@@ -1,0 +1,135 @@
+version: '3.4'
+
+services:
+  traefik:
+    image: traefik:latest
+    command: --api --docker
+    ports:
+      - "80:80"
+      - "443:443"
+      - "8080:8080"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /Users/sylvain/meetup/traefik.toml:/traefik.toml
+      - /Users/sylvain/meetup/acme.json:/acme.json
+
+  whoami:
+    image: containous/whoami
+    labels:
+      - traefik.frontend.rule=Host:whoami.${DOMAIN_NAME}
+    networks:
+      - meetup
+
+  php:
+    image: ${CONTAINER_REGISTRY_BASE}/php
+    environment:
+      - CORS_ALLOW_ORIGIN=${HTTP_OR_SSL}((api|admin|cache|db)?.)?${DOMAIN_NAME}
+    build:
+      context: ./api
+      target: api_platform_php
+      cache_from:
+        - ${CONTAINER_REGISTRY_BASE}/php
+        - ${CONTAINER_REGISTRY_BASE}/nginx
+        - ${CONTAINER_REGISTRY_BASE}/varnish
+    depends_on:
+      - db
+    volumes:
+      - ./api:/srv/api:rw,cached
+    networks:
+      - meetup
+
+  api:
+    image: ${CONTAINER_REGISTRY_BASE}/nginx
+    build:
+      context: ./api
+      target: api_platform_nginx
+      cache_from:
+        - ${CONTAINER_REGISTRY_BASE}/php
+        - ${CONTAINER_REGISTRY_BASE}/nginx
+        - ${CONTAINER_REGISTRY_BASE}/varnish
+    depends_on:
+      - php
+    volumes:
+      - ./api/public:/srv/api/public:ro
+    labels:
+      - traefik.frontend.rule=Host:api.${DOMAIN_NAME}
+    networks:
+      - meetup
+
+  cache-proxy:
+    image: ${CONTAINER_REGISTRY_BASE}/varnish
+    build:
+      context: ./api
+      target: api_platform_varnish
+      cache_from:
+        - ${CONTAINER_REGISTRY_BASE}/php
+        - ${CONTAINER_REGISTRY_BASE}/nginx
+        - ${CONTAINER_REGISTRY_BASE}/varnish
+    depends_on:
+      - api
+    volumes:
+      - ./api/docker/varnish/conf:/usr/local/etc/varnish:ro
+    tmpfs:
+      - /usr/local/var/varnish:exec
+    labels:
+      - traefik.frontend.rule=Host:cache.${DOMAIN_NAME}
+    networks:
+      - meetup
+
+  db:
+    image: postgres:9.6-alpine
+    environment:
+      - POSTGRES_DB=api
+      - POSTGRES_USER=api-platform
+      - POSTGRES_PASSWORD=!ChangeMe!
+    volumes:
+      - db-data:/var/lib/postgresql/data:rw
+    labels:
+      - traefik.frontend.rule=Host:db.${DOMAIN_NAME}
+    networks:
+      - meetup
+
+  client:
+    image: ${CONTAINER_REGISTRY_BASE}/client
+    build:
+      context: ./client
+      cache_from:
+        - ${CONTAINER_REGISTRY_BASE}/client
+    env_file:
+      - ./client/.env
+    volumes:
+      - ./client:/usr/src/client:rw,cached
+      - /usr/src/client/node_modules
+    environment:
+      - REACT_APP_API_ENTRYPOINT=${HTTP_OR_SSL}api.${DOMAIN_NAME}
+    expose:
+      - 3000
+    labels:
+      - traefik.frontend.rule=Host:${DOMAIN_NAME}
+      - "traefik.port=3000"
+    networks:
+      - meetup
+
+  admin:
+    image: ${CONTAINER_REGISTRY_BASE}/admin
+    build:
+      context: ./admin
+      cache_from:
+        - ${CONTAINER_REGISTRY_BASE}/admin
+    environment:
+      - REACT_APP_API_ENTRYPOINT=${HTTP_OR_SSL}api.${DOMAIN_NAME}
+    volumes:
+      - ./admin:/usr/src/admin:rw,cached
+      - /usr/src/admin/node_modules
+    labels:
+      - traefik.frontend.rule=Host:admin.${DOMAIN_NAME}
+      - "traefik.port=3000"
+    networks:
+      - meetup
+
+volumes:
+  db-data: {}
+
+networks:
+  meetup:
+    external: true

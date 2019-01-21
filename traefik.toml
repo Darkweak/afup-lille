@@ -1,0 +1,22 @@
+defaultEntryPoints = ["https", "http"]
+
+[entryPoints]
+  [entryPoints.http]
+  address = ":80"
+  [entryPoints.http.redirect]
+    entryPoint = "https"
+  [entryPoints.https]
+  address = ":443"
+    [entryPoints.https.tls]
+
+[acme]
+email = "sylvaincombraque@hotmail.fr"
+storage="acme.json"
+entryPoint = "https"
+#caServer = "https://acme-staging-v02.api.letsencrypt.org/directory"
+acmeLogging=true
+[acme.httpChallenge]
+entryPoint = "http"
+[[acme.domains]]
+  main = "afup-lille.tk"
+  sans = ["admin.afup-lille.tk", "api.afup-lille.tk", "cache.afup-lille.tk", "db.afup-lille.tk"]
